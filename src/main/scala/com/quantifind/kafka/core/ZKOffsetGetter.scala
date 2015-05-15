@@ -1,16 +1,16 @@
-package com.quantifind.kafka
+package com.quantifind.kafka.core
 
-import scala.collection._
-
-import com.quantifind.kafka.OffsetGetter.{BrokerInfo, KafkaInfo, OffsetInfo}
+import com.quantifind.kafka.core.OffsetGetter.{BrokerInfo, KafkaInfo, OffsetInfo}
+import com.twitter.util.Time
 import kafka.api.{OffsetRequest, PartitionOffsetRequestInfo}
 import kafka.common.{BrokerNotAvailableException, TopicAndPartition}
 import kafka.consumer.SimpleConsumer
 import kafka.utils.{Json, Logging, ZkUtils}
 import org.I0Itec.zkclient.ZkClient
 import org.I0Itec.zkclient.exception.ZkNoNodeException
-import com.twitter.util.Time
 import org.apache.zookeeper.data.Stat
+
+import scala.collection._
 import scala.util.control.NonFatal
 
 /**
@@ -18,16 +18,7 @@ import scala.util.control.NonFatal
  * User: pierre
  * Date: 1/22/14
  */
-
-case class Node(name: String, children: Seq[Node] = Seq())
-
-case class TopicDetails(consumers: Seq[ConsumerDetail])
-
-case class ConsumerDetail(name: String)
-
-class OffsetGetter(zkClient: ZkClient) extends Logging {
-
-  private val consumerMap: mutable.Map[Int, Option[SimpleConsumer]] = mutable.Map()
+class ZKOffsetGetter(zkClient: ZkClient) extends OffsetGetter with Logging {
 
   private def getConsumer(bid: Int): Option[SimpleConsumer] = {
     try {
@@ -95,7 +86,6 @@ class OffsetGetter(zkClient: ZkClient) extends Logging {
       info <- processPartition(group, topic, pid)
     } yield info
   }
-
   private def brokerInfo(): Iterable[BrokerInfo] = {
     for {
       (bid, consumerOpt) <- consumerMap
@@ -118,7 +108,8 @@ class OffsetGetter(zkClient: ZkClient) extends Logging {
     topicList.sorted.flatMap(processTopic(group, _))
   }
 
-  def getInfo(group: String, topics: Seq[String] = Seq()): KafkaInfo = {
+
+  override  def getInfo(group: String, topics: Seq[String] = Seq()): KafkaInfo = {
     val off = offsetInfo(group, topics)
     val brok = brokerInfo()
     KafkaInfo(
@@ -127,7 +118,8 @@ class OffsetGetter(zkClient: ZkClient) extends Logging {
     )
   }
 
-  def getGroups: Seq[String] = {
+
+  override def getGroups: Seq[String] = {
     try {
       ZkUtils.getChildren(zkClient, ZkUtils.ConsumersPath)
     } catch {
@@ -137,25 +129,7 @@ class OffsetGetter(zkClient: ZkClient) extends Logging {
     }
   }
 
-
-  /**
-   * returns details for a given topic such as the active consumers pulling off of it
-   * @param topic
-   * @return
-   */
-  def getTopicDetail(topic: String): TopicDetails = {
-    val topicMap = getActiveTopicMap
-
-    if (topicMap.contains(topic)) {
-      TopicDetails(topicMap(topic).map(consumer => {
-        ConsumerDetail(consumer.toString)
-      }).toSeq)
-    } else {
-      TopicDetails(Seq(ConsumerDetail("Unable to find Active Consumers")))
-    }
-  }
-
-  def getTopics: Seq[String] = {
+  override def getTopics: Seq[String] = {
     try {
       ZkUtils.getChildren(zkClient, ZkUtils.BrokerTopicsPath).sortWith(_ < _)
     } catch {
@@ -166,13 +140,12 @@ class OffsetGetter(zkClient: ZkClient) extends Logging {
     }
   }
 
-
   /**
    * returns a map of active topics-> list of consumers from zookeeper, ones that have IDS attached to them
    *
    * @return
    */
-  def getActiveTopicMap: Map[String, Seq[String]] = {
+  override def getActiveTopicMap: Map[String, Seq[String]] = {
     try {
       ZkUtils.getChildren(zkClient, ZkUtils.ConsumersPath).flatMap {
         group =>
@@ -196,50 +169,11 @@ class OffsetGetter(zkClient: ZkClient) extends Logging {
     }
   }
 
-  def getActiveTopics: Node = {
-    val topicMap = getActiveTopicMap
-
-    Node("ActiveTopics", topicMap.map {
-      case (s: String, ss: Seq[String]) => {
-        Node(s, ss.map(consumer => Node(consumer)))
-
-      }
-    }.toSeq)
-  }
-
-  def getClusterViz: Node = {
+  override def getClusterViz: Node = {
     val clusterNodes = ZkUtils.getAllBrokersInCluster(zkClient).map((broker) => {
       Node(broker.getConnectionString(), Seq())
     })
     Node("KafkaCluster", clusterNodes)
-  }
-
-  def close() {
-    for (consumerOpt <- consumerMap.values) {
-      consumerOpt match {
-        case Some(consumer) => consumer.close()
-        case None => // ignore
-      }
-    }
-  }
-
-}
-
-object OffsetGetter {
-
-  case class KafkaInfo(brokers: Seq[BrokerInfo], offsets: Seq[OffsetInfo])
-
-  case class BrokerInfo(id: Int, host: String, port: Int)
-
-  case class OffsetInfo(group: String,
-                        topic: String,
-                        partition: Int,
-                        offset: Long,
-                        logSize: Long,
-                        owner: Option[String],
-                        creation: Time,
-                        modified: Time) {
-    val lag = logSize - offset
   }
 
 }

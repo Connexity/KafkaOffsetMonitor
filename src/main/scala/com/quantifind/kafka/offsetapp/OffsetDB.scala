@@ -1,9 +1,11 @@
 package com.quantifind.kafka.offsetapp
 
+import com.quantifind.kafka.core.OffsetGetter
+import com.quantifind.kafka.core.OffsetGetter.OffsetInfo
+
 import scala.slick.driver.SQLiteDriver.simple._
 import scala.slick.jdbc.meta.MTable
 
-import com.quantifind.kafka.OffsetGetter.OffsetInfo
 import com.quantifind.kafka.offsetapp.OffsetDB.{DbOffsetInfo, OffsetHistory, OffsetPoints}
 import com.twitter.util.Time
 

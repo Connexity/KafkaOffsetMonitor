@@ -1,26 +1,23 @@
 package com.quantifind.kafka.offsetapp
 
-import java.sql.SQLException
 import java.util.{Timer, TimerTask}
 
+import com.quantifind.kafka.core.OffsetGetter.KafkaInfo
+import com.quantifind.kafka.core.ZKOffsetGetter
+import com.quantifind.sumac.validation.Required
+import com.quantifind.utils.UnfilteredWebApp
 import com.quantifind.utils.Utils.retry
-
-import scala.concurrent.duration._
-
-import com.quantifind.kafka.OffsetGetter.KafkaInfo
-import com.quantifind.utils.{Utils, UnfilteredWebApp}
+import com.twitter.util.Time
 import kafka.utils.{Logging, ZKStringSerializer}
-import net.liftweb.json.{CustomSerializer, NoTypeHints, Serialization}
+import net.liftweb.json.JsonAST.JInt
 import net.liftweb.json.Serialization.write
+import net.liftweb.json.{CustomSerializer, NoTypeHints, Serialization}
 import org.I0Itec.zkclient.ZkClient
 import unfiltered.filter.Plan
 import unfiltered.request.{GET, Path, Seg}
 import unfiltered.response.{JsonContent, Ok, ResponseString}
-import com.quantifind.kafka.OffsetGetter
-import com.quantifind.sumac.validation.Required
-import com.twitter.util.Time
-import net.liftweb.json.JsonAST.JInt
 
+import scala.concurrent.duration._
 import scala.util.control.NonFatal
 
 class OWArgs extends OffsetGetterArgs with UnfilteredWebApp.Arguments {
@@ -80,10 +77,10 @@ object OffsetGetterWeb extends UnfilteredWebApp[OWArgs] with Logging {
     }, args.retain.toMillis, args.retain.toMillis)
   }
 
-  def withOG[T](args: OWArgs)(f: OffsetGetter => T): T = {
-    var og: OffsetGetter = null
+  def withOG[T](args: OWArgs)(f: ZKOffsetGetter => T): T = {
+    var og: ZKOffsetGetter = null
     try {
-      og = new OffsetGetter(zkClient)
+      og = new ZKOffsetGetter(zkClient)
       f(og)
     } finally {
       if (og != null) og.close()

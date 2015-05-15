@@ -2,15 +2,13 @@ package com.quantifind.kafka.offsetapp
 
 import java.text.NumberFormat
 
-import com.quantifind.kafka.OffsetGetter.OffsetInfo
-
-import scala.concurrent.duration._
-
-import com.quantifind.sumac.{ ArgMain, FieldArgs }
+import com.quantifind.kafka.core.ZKOffsetGetter
 import com.quantifind.sumac.validation.Required
+import com.quantifind.sumac.{ArgMain, FieldArgs}
 import kafka.utils.ZKStringSerializer
 import org.I0Itec.zkclient.ZkClient
-import com.quantifind.kafka.OffsetGetter
+
+import scala.concurrent.duration._
 
 class OffsetGetterArgsWGT extends OffsetGetterArgs {
   @Required
@@ -44,13 +42,13 @@ object OffsetGetterApp extends ArgMain[OffsetGetterArgsWGT] {
 
   def main(args: OffsetGetterArgsWGT) {
     var zkClient: ZkClient = null
-    var og: OffsetGetter = null
+    var og: ZKOffsetGetter = null
     try {
       zkClient = new ZkClient(args.zk,
         args.zkSessionTimeout.toMillis.toInt,
         args.zkConnectionTimeout.toMillis.toInt,
         ZKStringSerializer)
-      og = new OffsetGetter(zkClient)
+      og = new ZKOffsetGetter(zkClient)
       val i = og.getInfo(args.group, args.topics)
 
       if (i.offsets.nonEmpty) {
