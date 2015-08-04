@@ -4,6 +4,8 @@ import com.quantifind.kafka.core.OffsetGetter.OffsetInfo
 import com.twitter.util.Time
 import kafka.api.{OffsetRequest, PartitionOffsetRequestInfo}
 import kafka.common.TopicAndPartition
+import kafka.consumer.ConsumerConnector
+import kafka.consumer.KafkaStream
 import kafka.server.OffsetManager
 import kafka.utils.ZkUtils
 import org.I0Itec.zkclient.ZkClient
@@ -12,14 +14,20 @@ import org.apache.zookeeper.data.Stat
 import scala.collection._
 import scala.util.control.NonFatal
 
-/**
- * a nicer version of kafka's ConsumerOffsetChecker tool
- * User: pierre
- * Date: 1/22/14
- */
-class ZKOffsetGetter(theZkClient: ZkClient) extends OffsetGetter {
+class KafkaOffsetGetter(theZkClient: ZkClient, kafkaConsumerConnector: ConsumerConnector) extends OffsetGetter {
 
   override val zkClient = theZkClient
+
+//  new Runnable {
+//    override def run() = {
+//      val ks: KafkaStream = _
+//      val it = ks.iterator()
+//      while (it.hasNext())
+//        it.next().message()
+//
+//    }
+//  }.run()
+//
 
   override def processPartition(group: String, topic: String, pid: Int): Option[OffsetInfo] = {
     try {
@@ -58,6 +66,7 @@ class ZKOffsetGetter(theZkClient: ZkClient) extends OffsetGetter {
 
   override def getGroups: Seq[String] = {
     try {
+      OffsetManager
       ZkUtils.getChildren(zkClient, ZkUtils.ConsumersPath)
     } catch {
       case NonFatal(t) =>
