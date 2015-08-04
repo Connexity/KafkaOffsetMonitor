@@ -6,7 +6,7 @@ import AssemblyKeys._
 object KafkaUtilsBuild extends Build {
 
   def sharedSettings = Defaults.defaultSettings ++ assemblySettings ++ Seq(
-    version := "0.2.2-snapshot",
+    version := "0.3.0-SNAPSHOT",
     scalaVersion := "2.10.3",
     organization := "com.quantifind",
     scalacOptions := Seq("-deprecation", "-unchecked", "-optimize"),
@@ -30,15 +30,22 @@ object KafkaUtilsBuild extends Build {
   lazy val offsetmonitor = Project("offsetmonitor", file("."), settings = offsetmonSettings)
 
   def offsetmonSettings = sharedSettings ++ Seq(
+    mergeStrategy in assembly := {
+     case "about.html"                                => MergeStrategy.discard
+     case x =>
+		val oldStrategy = (mergeStrategy in assembly).value
+    		oldStrategy(x)
+	},
     name := "KafkaOffsetMonitor",
     libraryDependencies ++= Seq(
-      "net.databinder" %% "unfiltered-filter" % "0.6.7",
-      "net.databinder" %% "unfiltered-jetty" % "0.6.7",
-      "net.databinder" %% "unfiltered-json" % "0.6.7",
+      "net.databinder" %% "unfiltered-filter" % "0.8.4",
+      "net.databinder" %% "unfiltered-jetty" % "0.8.4",
+      "net.databinder" %% "unfiltered-json4s" % "0.8.4",
       "com.quantifind" %% "sumac" % "0.3.0",
       "com.typesafe.slick" %% "slick" % "2.0.0",
       "org.xerial" % "sqlite-jdbc" % "3.7.2",
-      "com.twitter" % "util-core" % "3.0.0"),
+      "com.twitter" % "util-core" % "3.0.0",
+      "org.reflections" % "reflections" % "0.9.10"),
     resolvers ++= Seq(
       "java m2" at "http://download.java.net/maven/2",
       "twitter repo" at "http://maven.twttr.com"))

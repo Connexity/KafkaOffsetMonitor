@@ -3,6 +3,9 @@ package com.quantifind.kafka.offsetapp
 import java.text.NumberFormat
 
 import com.quantifind.kafka.core.ZKOffsetGetter
+import scala.concurrent.duration._
+
+import com.quantifind.sumac.{ ArgMain, FieldArgs }
 import com.quantifind.sumac.validation.Required
 import com.quantifind.sumac.{ArgMain, FieldArgs}
 import kafka.utils.ZKStringSerializer

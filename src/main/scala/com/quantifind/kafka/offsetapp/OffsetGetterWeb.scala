@@ -1,22 +1,27 @@
 package com.quantifind.kafka.offsetapp
 
-import java.util.{Timer, TimerTask}
+import java.lang.reflect.Constructor
+import java.util.concurrent.{Executors, ScheduledExecutorService, TimeUnit}
 
-import com.quantifind.kafka.core.OffsetGetter.KafkaInfo
+import com.quantifind.kafka.OffsetGetter
+import OffsetGetter.KafkaInfo
 import com.quantifind.kafka.core.ZKOffsetGetter
+import com.quantifind.kafka.offsetapp.sqlite.SQLiteOffsetInfoReporter
 import com.quantifind.sumac.validation.Required
 import com.quantifind.utils.UnfilteredWebApp
 import com.quantifind.utils.Utils.retry
 import com.twitter.util.Time
 import kafka.utils.{Logging, ZKStringSerializer}
-import net.liftweb.json.JsonAST.JInt
-import net.liftweb.json.Serialization.write
-import net.liftweb.json.{CustomSerializer, NoTypeHints, Serialization}
 import org.I0Itec.zkclient.ZkClient
+import org.json4s.native.Serialization
+import org.json4s.native.Serialization.write
+import org.json4s.{CustomSerializer, JInt, NoTypeHints}
+import org.reflections.Reflections
 import unfiltered.filter.Plan
 import unfiltered.request.{GET, Path, Seg}
 import unfiltered.response.{JsonContent, Ok, ResponseString}
 
+import scala.collection.mutable
 import scala.concurrent.duration._
 import scala.util.control.NonFatal
 
@@ -30,6 +35,8 @@ class OWArgs extends OffsetGetterArgs with UnfilteredWebApp.Arguments {
   var dbName: String = "offsetapp"
 
   lazy val db = new OffsetDB(dbName)
+
+  var pluginsArgs : String = _
 }
 
 /**
@@ -38,43 +45,42 @@ class OWArgs extends OffsetGetterArgs with UnfilteredWebApp.Arguments {
  * Date: 1/23/14
  */
 object OffsetGetterWeb extends UnfilteredWebApp[OWArgs] with Logging {
+
+  implicit def funToRunnable(fun: () => Unit) = new Runnable() { def run() = fun() }
+
   def htmlRoot: String = "/offsetapp"
 
-  val timer = new Timer()
-  var zkClient: ZkClient = null
+  val  scheduler : ScheduledExecutorService = Executors.newScheduledThreadPool(2)
 
-  def writeToDb(args: OWArgs) {
+  var zkClient: ZkClient = null
+  var reporters: mutable.Set[OffsetInfoReporter] = null
+
+  def retryTask[T](fn: => T) {
+    try {
+      retry(3) {
+        fn
+      }
+    } catch {
+      case NonFatal(e) =>
+        error("Failed to run scheduled task", e)
+    }
+  }
+
+  def reportOffsets(args: OWArgs) {
     val groups = getGroups(args)
     groups.foreach {
       g =>
         val inf = getInfo(g, args).offsets.toIndexedSeq
-        info(s"inserting ${inf.size}")
-        args.db.insertAll(inf)
+        info(s"reporting ${inf.size}")
+        reporters.foreach( reporter => retryTask { reporter.report(inf) } )
     }
   }
 
   def schedule(args: OWArgs) {
-    def retryTask[T](fn: => T) {
-      try {
-        retry(3) {
-          fn
-        }
-      } catch {
-        case NonFatal(e) =>
-          error("Failed to run scheduled task", e)
-      }
-    }
 
-    timer.scheduleAtFixedRate(new TimerTask() {
-      override def run() {
-        retryTask(writeToDb(args))
-      }
-    }, 0, args.refresh.toMillis)
-    timer.scheduleAtFixedRate(new TimerTask() {
-      override def run() {
-        retryTask(args.db.emptyOld(System.currentTimeMillis - args.retain.toMillis))
-      }
-    }, args.retain.toMillis, args.retain.toMillis)
+    scheduler.scheduleAtFixedRate( () => { reportOffsets(args) }, 0, args.refresh.toMillis, TimeUnit.MILLISECONDS )
+    scheduler.scheduleAtFixedRate( () => { reporters.foreach(reporter => retryTask({reporter.cleanupOldData()})) }, args.retain.toMillis, args.retain.toMillis, TimeUnit.MILLISECONDS )
+
   }
 
   def withOG[T](args: OWArgs)(f: ZKOffsetGetter => T): T = {
@@ -106,13 +112,18 @@ object OffsetGetterWeb extends UnfilteredWebApp[OWArgs] with Logging {
     _.getTopicDetail(topic)
   }
 
+  def getTopicAndConsumersDetail(topic: String, args: OWArgs) = withOG(args) {
+    _.getTopicAndConsumersDetail(topic)
+  }
+
   def getClusterViz(args: OWArgs) = withOG(args) {
     _.getClusterViz
   }
 
   override def afterStop() {
-    timer.cancel()
-    timer.purge()
+
+    scheduler.shutdown()
+
     if (zkClient != null)
       zkClient.close()
   }
@@ -134,6 +145,9 @@ object OffsetGetterWeb extends UnfilteredWebApp[OWArgs] with Logging {
     zkClient = new ZkClient(args.zk,  args.zkSessionTimeout.toMillis.toInt,
                                       args.zkConnectionTimeout.toMillis.toInt,
                                       ZKStringSerializer)
+
+    reporters = createOffsetInfoReporters(args)
+
     schedule(args)
 
     def intent: Plan.Intent = {
@@ -149,10 +163,32 @@ object OffsetGetterWeb extends UnfilteredWebApp[OWArgs] with Logging {
         JsonContent ~> ResponseString(write(getTopics(args)))
       case GET(Path(Seg("clusterlist" :: Nil))) =>
         JsonContent ~> ResponseString(write(getClusterViz(args)))
-      case GET(Path(Seg("topicdetails" :: group :: Nil))) =>
-        JsonContent ~> ResponseString(write(getTopicDetail(group, args)))
+      case GET(Path(Seg("topicdetails" :: topic :: Nil))) =>
+        JsonContent ~> ResponseString(write(getTopicDetail(topic, args)))
+      case GET(Path(Seg("topic" :: topic :: "consumer" :: Nil))) =>
+        JsonContent ~> ResponseString(write(getTopicAndConsumersDetail(topic, args)))
       case GET(Path(Seg("activetopics" :: Nil))) =>
         JsonContent ~> ResponseString(write(getActiveTopics(args)))
     }
+  }
+
+  def createOffsetInfoReporters(args: OWArgs) = {
+
+    val reflections = new Reflections()
+
+    val reportersTypes: java.util.Set[Class[_ <: OffsetInfoReporter]] = reflections.getSubTypesOf(classOf[OffsetInfoReporter])
+
+    val reportersSet: mutable.Set[Class[_ <: OffsetInfoReporter]] = scala.collection.JavaConversions.asScalaSet(reportersTypes)
+
+    // SQLiteOffsetInfoReporter as a main storage is instantiated explicitly outside this loop so it is filtered out
+    reportersSet
+      .filter(!_.equals(classOf[SQLiteOffsetInfoReporter]))
+      .map((reporterType: Class[_ <: OffsetInfoReporter]) =>  createReporterInstance(reporterType, args.pluginsArgs))
+      .+(new SQLiteOffsetInfoReporter(argHolder.db, args))
+  }
+
+  def createReporterInstance(reporterClass: Class[_ <: OffsetInfoReporter], rawArgs: String): OffsetInfoReporter = {
+    val constructor: Constructor[_ <: OffsetInfoReporter] = reporterClass.getConstructor(classOf[String])
+    constructor.newInstance(rawArgs)
   }
 }

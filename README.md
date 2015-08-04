@@ -49,7 +49,40 @@ The arguments are:
 - **refresh** how often should the app refresh and store a point in the DB
 - **retain** how long should points be kept in the DB
 - **dbName** where to store the history (default 'offsetapp')
+- **pluginsArgs** additional arguments used by extensions (see below)
 
+Writing and using plugins
+============================
+
+Kafka Offset Monitor allows you to plug-in additional offset info reporters in case you want this information to be logged or stored somewhere. In order to write your own plugin,
+all you need to do is to implement OffsetInfoReporter trait:
+
+```
+trait OffsetInfoReporter {
+  def report(info: IndexedSeq[OffsetInfo])
+  def cleanupOldData() = {}
+}
+```
+
+It is also required, that implementation has a constructor with String as the only parameter, and this parameter will be set to pluginsArgs argument value.
+Its up to you how you want to utilize this argument and configure your plugin.
+
+When building a plugin you may find it difficult to set up dependency to Kafka Offset Monitor classes, as currently artifacts are not published to public repos.
+As long as this is true you will need to use local maven repo and just publish Kafka Offset Monitor artifact with: ```sbt publishM2```
+
+Assuming you have a custom implementation of OffsetInfoReporter in a jar file, running it is as simple as adding the jar to the classpath when running app:
+
+```
+java -cp KafkaOffsetMonitor-assembly-0.3.0.jar:kafka-offset-monitor-another-db-reporter.jar \
+     com.quantifind.kafka.offsetapp.OffsetGetterWeb \
+     --zk zk-server1,zk-server2 \
+     --port 8080 \
+     --refresh 10.seconds \
+     --retain 2.days
+     --pluginsArgs anotherDbHost=host1,anotherDbPort=555
+```
+
+For complete working example you can check [kafka-offset-monitor-graphite](https://github.com/allegro/kafka-offset-monitor-graphite), a plugin reporting offset information to Graphite.
 
 Contributing
 ============

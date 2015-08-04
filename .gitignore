@@ -19,3 +19,6 @@ lib_managed
 offsetapp.db
 fabfile.py
 target
+/bin/
+.cache
+.settings

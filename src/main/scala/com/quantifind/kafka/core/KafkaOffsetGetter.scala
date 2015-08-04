@@ -1,6 +1,7 @@
 package com.quantifind.kafka.core
 
-import com.quantifind.kafka.core.OffsetGetter.OffsetInfo
+import com.quantifind.kafka.OffsetGetter
+import OffsetGetter.OffsetInfo
 import com.twitter.util.Time
 import kafka.api.{OffsetRequest, PartitionOffsetRequestInfo}
 import kafka.common.TopicAndPartition

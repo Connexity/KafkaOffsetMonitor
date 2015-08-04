@@ -1,10 +1,10 @@
-package com.quantifind.kafka.core
+package com.quantifind.kafka
 
-import com.quantifind.kafka.core.OffsetGetter.{BrokerInfo, KafkaInfo, OffsetInfo}
+import com.quantifind.kafka.OffsetGetter.{BrokerInfo, OffsetInfo, KafkaInfo}
 import com.twitter.util.Time
 import kafka.common.BrokerNotAvailableException
 import kafka.consumer.SimpleConsumer
-import kafka.utils.{Logging, Json, ZkUtils}
+import kafka.utils.{Json, Logging, ZkUtils}
 import org.I0Itec.zkclient.ZkClient
 import org.I0Itec.zkclient.exception.ZkNoNodeException
 
@@ -14,6 +14,10 @@ import scala.util.control.NonFatal
 case class Node(name: String, children: Seq[Node] = Seq())
 
 case class TopicDetails(consumers: Seq[ConsumerDetail])
+case class TopicDetailsWrapper(consumers: TopicDetails)
+
+case class TopicAndConsumersDetails(active: Seq[KafkaInfo], inactive: Seq[KafkaInfo])
+case class TopicAndConsumersDetailsWrapper(consumers: TopicAndConsumersDetails)
 
 case class ConsumerDetail(name: String)
 
@@ -68,22 +72,27 @@ trait OffsetGetter  extends Logging {
   protected def offsetInfo(group: String, topics: Seq[String] = Seq()): Seq[OffsetInfo] = {
 
     val topicList = if (topics.isEmpty) {
-      try {
-        ZkUtils.getChildren(
-          zkClient, s"${ZkUtils.ConsumersPath}/$group/offsets").toSeq
-      } catch {
-        case _: ZkNoNodeException => Seq()
-      }
+      getTopicList(group)
     } else {
       topics
     }
+
     topicList.sorted.flatMap(processTopic(group, _))
+  }
+
+  def getTopicList(group: String): List[String] = {
+    try {
+      ZkUtils.getChildren(zkClient, s"${ZkUtils.ConsumersPath}/$group/offsets").toList
+    } catch {
+      case _: ZkNoNodeException => List()
+    }
   }
 
   def getInfo(group: String, topics: Seq[String] = Seq()): KafkaInfo = {
     val off = offsetInfo(group, topics)
     val brok = brokerInfo()
     KafkaInfo(
+      name = group,
       brokers = brok.toSeq,
       offsets = off
     )
@@ -108,9 +117,7 @@ trait OffsetGetter  extends Logging {
   }
 
   /**
-   * returns details for a given topic such as the active consumers pulling off of it
-   * @param topic
-   * @return
+   * Returns details for a given topic such as the consumers pulling off of it
    */
   def getTopicDetail(topic: String): TopicDetails = {
     val topicMap = getActiveTopicMap
@@ -121,6 +128,56 @@ trait OffsetGetter  extends Logging {
       }).toSeq)
     } else {
       TopicDetails(Seq(ConsumerDetail("Unable to find Active Consumers")))
+    }
+  }
+
+  def mapConsumerDetails(consumers: Seq[String]): Seq[ConsumerDetail] =
+    consumers.map(consumer => ConsumerDetail(consumer.toString))
+
+  /**
+   * Returns details for a given topic such as the active consumers pulling off of it
+   * and for each of the active consumers it will return the consumer data
+   */
+  def getTopicAndConsumersDetail(topic: String): TopicAndConsumersDetailsWrapper = {
+    val topicMap = getTopicMap
+    val activeTopicMap = getActiveTopicMap
+
+    val activeConsumers = if (activeTopicMap.contains(topic)) {
+        mapConsumersToKafkaInfo(activeTopicMap(topic), topic)
+    } else {
+        Seq()
+    }
+
+    val inactiveConsumers = if (!activeTopicMap.contains(topic) && topicMap.contains(topic)) {
+      mapConsumersToKafkaInfo(topicMap(topic), topic)
+    } else if (activeTopicMap.contains(topic) && topicMap.contains(topic)) {
+      mapConsumersToKafkaInfo(topicMap(topic).diff(activeTopicMap(topic)), topic)
+    } else {
+      Seq()
+    }
+
+    TopicAndConsumersDetailsWrapper(TopicAndConsumersDetails(activeConsumers, inactiveConsumers))
+  }
+
+  def mapConsumersToKafkaInfo(consumers: Seq[String], topic: String): Seq[KafkaInfo] =
+    consumers.map(getInfo(_, Seq(topic)))
+
+  /**
+   * Returns a map of topics -> list of consumers, including non-active
+   */
+  def getTopicMap: Map[String, Seq[String]] = {
+    try {
+      ZkUtils.getChildren(zkClient, ZkUtils.ConsumersPath).flatMap {
+        group => {
+          getTopicList(group).map(topic => topic -> group)
+        }
+      }.groupBy(_._1).mapValues {
+        _.unzip._2
+      }
+    } catch {
+      case NonFatal(t) =>
+        error(s"could not get topic maps because of ${t.getMessage}", t)
+        Map()
     }
   }
 
@@ -147,7 +204,7 @@ trait OffsetGetter  extends Logging {
 
 object OffsetGetter {
 
-  case class KafkaInfo(brokers: Seq[BrokerInfo], offsets: Seq[OffsetInfo])
+  case class KafkaInfo(name: String, brokers: Seq[BrokerInfo], offsets: Seq[OffsetInfo])
 
   case class BrokerInfo(id: Int, host: String, port: Int)
 
