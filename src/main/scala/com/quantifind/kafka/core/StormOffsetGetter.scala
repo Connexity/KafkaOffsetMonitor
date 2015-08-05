@@ -1,12 +1,11 @@
 package com.quantifind.kafka.core
 
 import com.quantifind.kafka.OffsetGetter
-import OffsetGetter.OffsetInfo
+import com.quantifind.kafka.OffsetGetter.OffsetInfo
 import com.twitter.util.Time
 import kafka.api.{OffsetRequest, PartitionOffsetRequestInfo}
 import kafka.common.TopicAndPartition
-import kafka.server.OffsetManager
-import kafka.utils.ZkUtils
+import kafka.utils.{Json, ZkUtils}
 import org.I0Itec.zkclient.ZkClient
 import org.I0Itec.zkclient.exception.ZkNoNodeException
 import org.apache.zookeeper.data.Stat
@@ -15,18 +14,28 @@ import scala.collection._
 import scala.util.control.NonFatal
 
 /**
- * a nicer version of kafka's ConsumerOffsetChecker tool
- * User: pierre
- * Date: 1/22/14
+ * a version that manages offsets saved by Storm Kafka Spout
+ * User: hsun
+ * Date: 8/1/15
  */
-class ZKOffsetGetter(theZkClient: ZkClient) extends OffsetGetter {
+class StormOffsetGetter(theZkClient: ZkClient) extends OffsetGetter {
+
+  import StormOffsetGetter._
 
   override val zkClient = theZkClient
 
   override def processPartition(group: String, topic: String, pid: Int): Option[OffsetInfo] = {
     try {
-      val (offset, stat: Stat) = ZkUtils.readData(zkClient, s"${ZkUtils.ConsumersPath}/$group/offsets/$topic/$pid")
-      val (owner, _) = ZkUtils.readDataMaybeNull(zkClient, s"${ZkUtils.ConsumersPath}/$group/owners/$topic/$pid")
+      val (stateJson, stat: Stat) = ZkUtils.readData(zkClient, s"$StormConsumerPath/$group/partition_$pid")
+      // val (owner, _) = ZkUtils.readDataMaybeNull(zkClient, s"${ZkUtils.ConsumersPath}/$group/owners/$topic/$pid")
+
+      val offset: String = Json.parseFull(stateJson) match {
+        case Some(m) =>
+          val spoutState = m.asInstanceOf[Map[String, Any]]
+          spoutState.get("offset").getOrElse("-1").toString
+        case None =>
+          "-1"
+      }
 
       ZkUtils.getLeaderForPartition(zkClient, topic, pid) match {
         case Some(bid) =>
@@ -43,7 +52,7 @@ class ZKOffsetGetter(theZkClient: ZkClient) extends OffsetGetter {
                 partition = pid,
                 offset = offset.toLong,
                 logSize = logSize,
-                owner = owner,
+                owner = Some("NA"),
                 creation = Time.fromMilliseconds(stat.getCtime),
                 modified = Time.fromMilliseconds(stat.getMtime))
           }
@@ -60,7 +69,7 @@ class ZKOffsetGetter(theZkClient: ZkClient) extends OffsetGetter {
 
   override def getGroups: Seq[String] = {
     try {
-      ZkUtils.getChildren(zkClient, ZkUtils.ConsumersPath)
+      ZkUtils.getChildren(zkClient, StormConsumerPath)
     } catch {
       case NonFatal(t) =>
         error(s"could not get groups because of ${t.getMessage}", t)
@@ -68,9 +77,18 @@ class ZKOffsetGetter(theZkClient: ZkClient) extends OffsetGetter {
     }
   }
 
+  // find all topics for this group, for Kafka Spout there is only one
   override def getTopicList(group: String): List[String] = {
     try {
-      ZkUtils.getChildren(zkClient, s"${ZkUtils.ConsumersPath}/$group/offsets").toList
+      // assume there should be partition 0
+      val (stateJson, _) = ZkUtils.readData(zkClient, s"$StormConsumerPath/$group/partition_0")
+      Json.parseFull(stateJson) match {
+        case Some(m) =>
+          val spoutState = m.asInstanceOf[Map[String, Any]]
+          List(spoutState.get("topic").getOrElse("Unknown Topic").toString)
+        case None =>
+          List()
+      }
     } catch {
       case _: ZkNoNodeException => List()
     }
@@ -81,7 +99,7 @@ class ZKOffsetGetter(theZkClient: ZkClient) extends OffsetGetter {
    */
   override def getTopicMap: Map[String, Seq[String]] = {
     try {
-      ZkUtils.getChildren(zkClient, ZkUtils.ConsumersPath).flatMap {
+      ZkUtils.getChildren(zkClient, StormConsumerPath).flatMap {
         group => {
           getTopicList(group).map(topic => topic -> group)
         }
@@ -95,29 +113,13 @@ class ZKOffsetGetter(theZkClient: ZkClient) extends OffsetGetter {
     }
   }
 
-
   override def getActiveTopicMap: Map[String, Seq[String]] = {
-    try {
-      ZkUtils.getChildren(zkClient, ZkUtils.ConsumersPath).flatMap {
-        group =>
-          try {
-            ZkUtils.getConsumersPerTopic(zkClient, group, true).keySet.map {
-              key =>
-                key -> group
-            }
-          } catch {
-            case NonFatal(t) =>
-              error(s"could not get consumers for group $group", t)
-              Seq()
-          }
-      }.groupBy(_._1).mapValues {
-        _.unzip._2
-      }
-    } catch {
-      case NonFatal(t) =>
-        error(s"could not get topic maps because of ${t.getMessage}", t)
-        Map()
-    }
+    // not really have a way to determine which consumer is active now, so return all
+    getTopicMap
   }
 
+}
+
+object StormOffsetGetter {
+  val StormConsumerPath = "/stormconsumers"
 }

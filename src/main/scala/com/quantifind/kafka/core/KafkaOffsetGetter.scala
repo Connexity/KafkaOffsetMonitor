@@ -15,7 +15,9 @@ import org.apache.zookeeper.data.Stat
 import scala.collection._
 import scala.util.control.NonFatal
 
-class KafkaOffsetGetter(theZkClient: ZkClient, kafkaConsumerConnector: ConsumerConnector) extends OffsetGetter {
+class KafkaOffsetGetter(theZkClient: ZkClient) extends OffsetGetter {
+
+  // kafkaConsumerConnector: ConsumerConnector
 
   override val zkClient = theZkClient
 
@@ -100,4 +102,8 @@ class KafkaOffsetGetter(theZkClient: ZkClient, kafkaConsumerConnector: ConsumerC
     }
   }
 
+  //  kind of interface methods
+  override def getTopicList(group: String): List[String] = ???
+
+  override def getTopicMap: Map[String, scala.Seq[String]] = ???
 }

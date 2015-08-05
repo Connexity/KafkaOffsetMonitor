@@ -83,10 +83,10 @@ object OffsetGetterWeb extends UnfilteredWebApp[OWArgs] with Logging {
 
   }
 
-  def withOG[T](args: OWArgs)(f: ZKOffsetGetter => T): T = {
-    var og: ZKOffsetGetter = null
+  def withOG[T](args: OWArgs)(f: OffsetGetter => T): T = {
+    var og: OffsetGetter = null
     try {
-      og = new ZKOffsetGetter(zkClient)
+      og = OffsetGetter.getInstance(args.offsetStorage, zkClient)
       f(og)
     } finally {
       if (og != null) og.close()

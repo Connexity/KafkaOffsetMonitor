@@ -2,6 +2,7 @@ package com.quantifind.kafka.offsetapp
 
 import java.text.NumberFormat
 
+import com.quantifind.kafka.OffsetGetter
 import com.quantifind.kafka.core.ZKOffsetGetter
 import scala.concurrent.duration._
 
@@ -14,6 +15,7 @@ import org.I0Itec.zkclient.ZkClient
 import scala.concurrent.duration._
 
 class OffsetGetterArgsWGT extends OffsetGetterArgs {
+
   @Required
   var group: String = _
 
@@ -28,12 +30,14 @@ class OffsetGetterArgsWGT extends OffsetGetterArgs {
 }
 
 class OffsetGetterArgs extends FieldArgs {
+
+  var offsetStorage: String = "zookeeper"
+
   @Required
   var zk: String = _
 
   var zkSessionTimeout: Duration = 30 seconds
   var zkConnectionTimeout: Duration = 30 seconds
-
 }
 
 /**
@@ -45,13 +49,15 @@ object OffsetGetterApp extends ArgMain[OffsetGetterArgsWGT] {
 
   def main(args: OffsetGetterArgsWGT) {
     var zkClient: ZkClient = null
-    var og: ZKOffsetGetter = null
+    var og: OffsetGetter = null
     try {
       zkClient = new ZkClient(args.zk,
         args.zkSessionTimeout.toMillis.toInt,
         args.zkConnectionTimeout.toMillis.toInt,
         ZKStringSerializer)
-      og = new ZKOffsetGetter(zkClient)
+
+      og = OffsetGetter.getInstance(args.offsetStorage, zkClient)
+
       val i = og.getInfo(args.group, args.topics)
 
       if (i.offsets.nonEmpty) {

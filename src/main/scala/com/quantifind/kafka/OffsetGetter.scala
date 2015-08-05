@@ -1,10 +1,12 @@
 package com.quantifind.kafka
 
 import com.quantifind.kafka.OffsetGetter.{BrokerInfo, OffsetInfo, KafkaInfo}
+import com.quantifind.kafka.core.{ZKOffsetGetter, StormOffsetGetter, KafkaOffsetGetter}
+import com.quantifind.kafka.offsetapp.OffsetGetterArgs
 import com.twitter.util.Time
 import kafka.common.BrokerNotAvailableException
 import kafka.consumer.SimpleConsumer
-import kafka.utils.{Json, Logging, ZkUtils}
+import kafka.utils.{ZKStringSerializer, Json, Logging, ZkUtils}
 import org.I0Itec.zkclient.ZkClient
 import org.I0Itec.zkclient.exception.ZkNoNodeException
 
@@ -26,10 +28,14 @@ trait OffsetGetter  extends Logging {
   val consumerMap: mutable.Map[Int, Option[SimpleConsumer]] = mutable.Map()
   def zkClient: ZkClient
 
-  def processPartition(group: String, topic: String, pid: Int): Option[OffsetInfo]
+  //  kind of interface methods
+  def getTopicList(group: String): List[String]
   def getGroups: Seq[String]
+  def getTopicMap: Map[String, Seq[String]]
   def getActiveTopicMap: Map[String, Seq[String]]
+  def processPartition(group: String, topic: String, pid: Int): Option[OffsetInfo]
 
+  // get the Kafka simple consumer so that we can fetch broker offsets
   protected def getConsumer(bid: Int): Option[SimpleConsumer] = {
     try {
       ZkUtils.readDataMaybeNull(zkClient, ZkUtils.BrokerIdsPath + "/" + bid) match {
@@ -80,14 +86,8 @@ trait OffsetGetter  extends Logging {
     topicList.sorted.flatMap(processTopic(group, _))
   }
 
-  def getTopicList(group: String): List[String] = {
-    try {
-      ZkUtils.getChildren(zkClient, s"${ZkUtils.ConsumersPath}/$group/offsets").toList
-    } catch {
-      case _: ZkNoNodeException => List()
-    }
-  }
 
+  // get information about a consumer group and the topics it consumes
   def getInfo(group: String, topics: Seq[String] = Seq()): KafkaInfo = {
     val off = offsetInfo(group, topics)
     val brok = brokerInfo()
@@ -98,6 +98,7 @@ trait OffsetGetter  extends Logging {
     )
   }
 
+  // get list of all topics
   def getTopics: Seq[String] = {
     try {
       ZkUtils.getChildren(zkClient, ZkUtils.BrokerTopicsPath).sortWith(_ < _)
@@ -162,24 +163,6 @@ trait OffsetGetter  extends Logging {
   def mapConsumersToKafkaInfo(consumers: Seq[String], topic: String): Seq[KafkaInfo] =
     consumers.map(getInfo(_, Seq(topic)))
 
-  /**
-   * Returns a map of topics -> list of consumers, including non-active
-   */
-  def getTopicMap: Map[String, Seq[String]] = {
-    try {
-      ZkUtils.getChildren(zkClient, ZkUtils.ConsumersPath).flatMap {
-        group => {
-          getTopicList(group).map(topic => topic -> group)
-        }
-      }.groupBy(_._1).mapValues {
-        _.unzip._2
-      }
-    } catch {
-      case NonFatal(t) =>
-        error(s"could not get topic maps because of ${t.getMessage}", t)
-        Map()
-    }
-  }
 
   def getActiveTopics: Node = {
     val topicMap = getActiveTopicMap
@@ -217,5 +200,14 @@ object OffsetGetter {
                         creation: Time,
                         modified: Time) {
     val lag = logSize - offset
+  }
+
+  def getInstance(offsetStorage: String, zkClient: ZkClient): OffsetGetter = {
+
+    offsetStorage.toLowerCase match {
+      case "kafka" => new KafkaOffsetGetter(zkClient)
+      case "storm" => new StormOffsetGetter(zkClient)
+      case _ => new ZKOffsetGetter(zkClient)
+    }
   }
 }
