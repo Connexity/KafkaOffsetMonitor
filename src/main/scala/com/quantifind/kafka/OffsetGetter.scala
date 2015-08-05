@@ -1,11 +1,14 @@
 package com.quantifind.kafka
 
+import java.util.Properties
+import java.util.concurrent.atomic.AtomicBoolean
+
 import com.quantifind.kafka.OffsetGetter.{BrokerInfo, OffsetInfo, KafkaInfo}
 import com.quantifind.kafka.core.{ZKOffsetGetter, StormOffsetGetter, KafkaOffsetGetter}
 import com.quantifind.kafka.offsetapp.OffsetGetterArgs
 import com.twitter.util.Time
 import kafka.common.BrokerNotAvailableException
-import kafka.consumer.SimpleConsumer
+import kafka.consumer.{ConsumerConfig, Consumer, ConsumerConnector, SimpleConsumer}
 import kafka.utils.{ZKStringSerializer, Json, Logging, ZkUtils}
 import org.I0Itec.zkclient.ZkClient
 import org.I0Itec.zkclient.exception.ZkNoNodeException
@@ -202,10 +205,37 @@ object OffsetGetter {
     val lag = logSize - offset
   }
 
-  def getInstance(offsetStorage: String, zkClient: ZkClient): OffsetGetter = {
+  val kafkaOffsetListenerStarted: AtomicBoolean = new AtomicBoolean(false)
+
+  def createZKClient(args: OffsetGetterArgs): ZkClient = {
+    new ZkClient(args.zk,
+      args.zkSessionTimeout.toMillis.toInt,
+      args.zkConnectionTimeout.toMillis.toInt,
+      ZKStringSerializer)
+  }
+
+  def createKafkaConsumerConnector(args: OffsetGetterArgs): ConsumerConnector = {
+    val props: Properties = new Properties()
+    // we want to be unique
+    props.put("group.id", "KafkaOffsetMonitor-" + System.currentTimeMillis)
+    props.put("zookeeper.connect", args.zk)
+    // must enable it
+    props.put("exclude.internal.topics", "false")
+    // we don't want to commit any thing, will always start from latest
+    props.put("auto.commit.enable", "false")
+    props.put("auto.offset.reset", "smallest")
+
+    Consumer.create(new ConsumerConfig(props))
+  }
+
+  def getInstance(offsetStorage: String, zkClient: ZkClient, consumerConnector: ConsumerConnector): OffsetGetter = {
 
     offsetStorage.toLowerCase match {
-      case "kafka" => new KafkaOffsetGetter(zkClient)
+      case "kafka" =>
+        if (kafkaOffsetListenerStarted.compareAndSet(false, true)) {
+          KafkaOffsetGetter.startOffsetListener(consumerConnector)
+        }
+        new KafkaOffsetGetter(zkClient)
       case "storm" => new StormOffsetGetter(zkClient)
       case _ => new ZKOffsetGetter(zkClient)
     }

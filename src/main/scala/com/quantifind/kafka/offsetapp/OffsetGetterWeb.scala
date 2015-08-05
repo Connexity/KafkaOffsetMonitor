@@ -1,6 +1,7 @@
 package com.quantifind.kafka.offsetapp
 
 import java.lang.reflect.Constructor
+import java.util.Properties
 import java.util.concurrent.{Executors, ScheduledExecutorService, TimeUnit}
 
 import com.quantifind.kafka.OffsetGetter
@@ -11,6 +12,7 @@ import com.quantifind.sumac.validation.Required
 import com.quantifind.utils.UnfilteredWebApp
 import com.quantifind.utils.Utils.retry
 import com.twitter.util.Time
+import kafka.consumer.{Consumer, ConsumerConnector, ConsumerConfig}
 import kafka.utils.{Logging, ZKStringSerializer}
 import org.I0Itec.zkclient.ZkClient
 import org.json4s.native.Serialization
@@ -53,6 +55,7 @@ object OffsetGetterWeb extends UnfilteredWebApp[OWArgs] with Logging {
   val  scheduler : ScheduledExecutorService = Executors.newScheduledThreadPool(2)
 
   var zkClient: ZkClient = null
+  var consumerConnector: ConsumerConnector = null
   var reporters: mutable.Set[OffsetInfoReporter] = null
 
   def retryTask[T](fn: => T) {
@@ -86,7 +89,7 @@ object OffsetGetterWeb extends UnfilteredWebApp[OWArgs] with Logging {
   def withOG[T](args: OWArgs)(f: OffsetGetter => T): T = {
     var og: OffsetGetter = null
     try {
-      og = OffsetGetter.getInstance(args.offsetStorage, zkClient)
+      og = OffsetGetter.getInstance(args.offsetStorage, zkClient, consumerConnector)
       f(og)
     } finally {
       if (og != null) og.close()
@@ -142,9 +145,9 @@ object OffsetGetterWeb extends UnfilteredWebApp[OWArgs] with Logging {
   override def setup(args: OWArgs): Plan = new Plan {
     implicit val formats = Serialization.formats(NoTypeHints) + new TimeSerializer
     args.db.maybeCreate()
-    zkClient = new ZkClient(args.zk,  args.zkSessionTimeout.toMillis.toInt,
-                                      args.zkConnectionTimeout.toMillis.toInt,
-                                      ZKStringSerializer)
+
+    zkClient = OffsetGetter.createZKClient(args)
+    consumerConnector = OffsetGetter.createKafkaConsumerConnector(args)
 
     reporters = createOffsetInfoReporters(args)
 
