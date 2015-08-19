@@ -95,7 +95,6 @@ class ZKOffsetGetter(theZkClient: ZkClient) extends OffsetGetter {
     }
   }
 
-
   override def getActiveTopicMap: Map[String, Seq[String]] = {
     try {
       ZkUtils.getChildren(zkClient, ZkUtils.ConsumersPath).flatMap {

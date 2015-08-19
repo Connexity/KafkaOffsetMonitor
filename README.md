@@ -26,6 +26,18 @@ History of Topic position
 
 ![Position Graph](http://quantifind.github.io/KafkaOffsetMonitor/img/graph.png)
 
+Offset Types
+===========
+
+Kafka is flexible on how the offsets are managed. Consumer can choose arbitrary storage and format to persist offsets.  KafkaOffsetMonitor currently 
+supports following popular storage formats
+
+* zookeeper built-in high-level consumer (based on Zookeeper)
+* kafka built-in offset management API (based on Kafka internal topic)
+* Storm Kafka Spout (based on Zookeeper by default)
+
+Each runtime instance of KafkaOffsetMonitor can only support a single type of storage format.
+
 Running It
 ===========
 
@@ -36,6 +48,7 @@ This is a small webapp, you can run it locally or on a server, as long as you ha
 ```
 java -cp KafkaOffsetMonitor-assembly-0.2.1.jar \
      com.quantifind.kafka.offsetapp.OffsetGetterWeb \
+     --offsetStorage kafka
      --zk zk-server1,zk-server2 \
      --port 8080 \
      --refresh 10.seconds \
@@ -44,12 +57,32 @@ java -cp KafkaOffsetMonitor-assembly-0.2.1.jar \
 
 The arguments are:
 
+- **offsetStorage** valid options are ''zookeeper'', ''kafka'' or ''storm''. Anything else falls back to ''zookeeper''
 - **zk** the ZooKeeper hosts
 - **port** on what port will the app be available
 - **refresh** how often should the app refresh and store a point in the DB
 - **retain** how long should points be kept in the DB
 - **dbName** where to store the history (default 'offsetapp')
+- **kafkaOffsetForceFromStart** only applies to ''kafka'' format. Force KafkaOffsetMonitor to scan the commit messages from start (see notes below)
+- **stormZKOffsetBase** only applies to ''storm'' format.  Change the offset storage base in zookeeper, default to ''/stormconsumers'' (see notes below)
 - **pluginsArgs** additional arguments used by extensions (see below)
+
+Special Notes on Kafka Format
+===============================
+With Kafka built-in offset management API, offsets are saved in an internal topic ''__consumer_offsets'' as ''commit'' messages. Because there is no place 
+to directly query existing consumers, KafkaOffsetMonitor needs to ''discover'' consumers by examining those ''commit'' messages.  If consumers are active, 
+KafkaOffsetMonitor could just listen to new ''commit'' messages and active consumers should be ''discovered'' after a short while.  If in case you want to 
+see the consumers without much load, you can use flag '''kafkaOffsetForceFromStart''' to scan all ''commit'' messages.
+
+Special Notes on Storm Storage
+===============================
+By default, Storm Kafka Spout stores offsets in ZK in a directory specified via ''SpoutConfig''. At same time, Kafka also stores its meta-data inside zookeeper. 
+In order to monitor Storm Kafka Spout offsets, KafkaOffsetMonitor requires that:
+ 
+ * Spout and Kafka use the same zookeeper cluster
+ * Spout stores the offsets under a sub-directory of Kafka's meta-data directory 
+
+This sub-directory can be configured via ''stormZKOffsetBase''. The default value is ''/stormconsumers''
 
 Writing and using plugins
 ============================

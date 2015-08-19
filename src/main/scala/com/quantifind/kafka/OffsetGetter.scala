@@ -223,21 +223,26 @@ object OffsetGetter {
     props.put("exclude.internal.topics", "false")
     // we don't want to commit any thing, will always start from latest
     props.put("auto.commit.enable", "false")
-    props.put("auto.offset.reset", "smallest")
+    props.put("auto.offset.reset", if (args.kafkaOffsetForceFromStart) "smallest" else "largest")
 
     Consumer.create(new ConsumerConfig(props))
   }
 
-  def getInstance(offsetStorage: String, zkClient: ZkClient, consumerConnector: ConsumerConnector): OffsetGetter = {
+  def getInstance(args: OffsetGetterArgs): OffsetGetter = {
 
-    offsetStorage.toLowerCase match {
+    val zkClient = createZKClient(args)
+    val consumerConnector = createKafkaConsumerConnector(args)
+
+    args.offsetStorage.toLowerCase match {
       case "kafka" =>
         if (kafkaOffsetListenerStarted.compareAndSet(false, true)) {
           KafkaOffsetGetter.startOffsetListener(consumerConnector)
         }
         new KafkaOffsetGetter(zkClient)
-      case "storm" => new StormOffsetGetter(zkClient)
-      case _ => new ZKOffsetGetter(zkClient)
+      case "storm" =>
+        new StormOffsetGetter(zkClient, args.stormZKOffsetBase)
+      case _ =>
+        new ZKOffsetGetter(zkClient)
     }
   }
 }

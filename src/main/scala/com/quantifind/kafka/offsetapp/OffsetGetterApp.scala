@@ -35,6 +35,10 @@ class OffsetGetterArgs extends FieldArgs {
 
   var offsetStorage: String = "zookeeper"
 
+  var kafkaOffsetForceFromStart = false
+
+  var stormZKOffsetBase = "/stormconsumers"
+
   @Required
   var zk: String = _
 
@@ -58,7 +62,7 @@ object OffsetGetterApp extends ArgMain[OffsetGetterArgsWGT] {
     try {
       zkClient = OffsetGetter.createZKClient(args)
       consumerConnector = OffsetGetter.createKafkaConsumerConnector(args)
-      og = OffsetGetter.getInstance(args.offsetStorage, zkClient, consumerConnector)
+      og = OffsetGetter.getInstance(args)
 
       val i = og.getInfo(args.group, args.topics)
 
@@ -78,7 +82,7 @@ object OffsetGetterApp extends ArgMain[OffsetGetterArgsWGT] {
                     case ((offAcc, logAcc, lagAcc), info) =>
                       (offAcc + info.offset, logAcc + info.logSize, lagAcc + info.lag)
                   }
-                  val fmtedLag = if (args.formatLagOutput) NumberFormat.getIntegerInstance().format(lag) else lag
+                  val fmtedLag = if (args.formatLagOutput) NumberFormat.getIntegerInstance.format(lag) else lag
                   "%-15s\t%-40s\t%-15s\t%-15s\t%-15s".format(head.group, head.topic, offset, log, fmtedLag)
                 }
             }.foreach(println)
@@ -88,7 +92,7 @@ object OffsetGetterApp extends ArgMain[OffsetGetterArgsWGT] {
           }
           i.offsets.foreach {
             info =>
-              val fmtedLag = if (args.formatLagOutput) NumberFormat.getIntegerInstance().format(info.lag) else info.lag
+              val fmtedLag = if (args.formatLagOutput) NumberFormat.getIntegerInstance.format(info.lag) else info.lag
               println("%-15s\t%-40s\t%-3s\t%-15s\t%-15s\t%-15s\t%s".format(info.group, info.topic, info.partition, info.offset, info.logSize, fmtedLag,
                 info.owner.getOrElse("none")))
           }

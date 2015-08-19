@@ -20,7 +20,7 @@ object KafkaUtilsBuild extends Build {
       "JBoss Repository" at "http://repository.jboss.org/nexus/content/repositories/releases/"),
     libraryDependencies ++= Seq(
       "log4j" % "log4j" % "1.2.17",
-      "org.scalatest" %% "scalatest" % "1.9.1" % "test",
+      "org.scalatest" %% "scalatest" % "2.2.4" % "test",
       "org.apache.kafka" %% "kafka" % "0.8.2.1"))
 
   val slf4jVersion = "1.6.1"
