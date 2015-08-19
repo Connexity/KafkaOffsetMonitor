@@ -74,7 +74,7 @@ object OffsetGetterWeb extends UnfilteredWebApp[OWArgs] with Logging {
     groups.foreach {
       g =>
         val inf = getInfo(g, args).offsets.toIndexedSeq
-        info(s"reporting ${inf.size}")
+        debug(s"reporting ${inf.size}")
         reporters.foreach( reporter => retryTask { reporter.report(inf) } )
     }
   }

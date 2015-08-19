@@ -82,26 +82,38 @@ object KafkaOffsetGetter extends Logging {
 
   def startOffsetListener(consumerConnector: ConsumerConnector) = {
 
-    logger.info("Staring Kafka offset topic listener")
-    val offsetMsgStream: KafkaStream[Array[Byte], Array[Byte]] = consumerConnector
-      .createMessageStreams(Map(ConsumerOffsetTopic -> 1))
-      .get(ConsumerOffsetTopic).map(_.head) match {
-      case Some(s) => s
-      case None => throw new IllegalStateException("Cannot create a consumer stream on offset topic ")
-    }
-
-    val it = offsetMsgStream.iterator()
     Future {
-      while (true) {
-        val offsetMsg: MessageAndMetadata[Array[Byte], Array[Byte]] = it.next()
-        val commitKey: GroupTopicPartition = readMessageKey(ByteBuffer.wrap(offsetMsg.key()))
-        val commitValue: OffsetAndMetadata = readMessageValue(ByteBuffer.wrap(offsetMsg.message()))
-        offsetMap += (commitKey -> commitValue)
-        topicAndGroups += TopicAndGroup(commitKey.topicPartition.topic, commitKey.group)
+      try {
+        logger.info("Staring Kafka offset topic listener")
+        val offsetMsgStream: KafkaStream[Array[Byte], Array[Byte]] = consumerConnector
+          .createMessageStreams(Map(ConsumerOffsetTopic -> 1))
+          .get(ConsumerOffsetTopic).map(_.head) match {
+          case Some(s) => s
+          case None => throw new IllegalStateException("Cannot create a consumer stream on offset topic ")
+        }
+
+        val it = offsetMsgStream.iterator()
+        while (true) {
+          try {
+            val offsetMsg: MessageAndMetadata[Array[Byte], Array[Byte]] = it.next()
+            val commitKey: GroupTopicPartition = readMessageKey(ByteBuffer.wrap(offsetMsg.key()))
+            val commitValue: OffsetAndMetadata = readMessageValue(ByteBuffer.wrap(offsetMsg.message()))
+            info("Processed commit message: " + commitKey + " => " + commitValue)
+            offsetMap += (commitKey -> commitValue)
+            topicAndGroups += TopicAndGroup(commitKey.topicPartition.topic, commitKey.group)
+          } catch {
+            case e: RuntimeException =>
+              // sometimes offsetMsg.key() || offsetMsg.message() throws NPE
+              warn("Failed to process one of the commit message due to exception. The 'bad' message will be skipped", e)
+          }
+        }
+      } catch {
+        case e: Throwable =>
+          fatal("Offset topic listener aborted dur to unexpected exception", e)
+          System.exit(1)
       }
     }
   }
-
 
 
   // massive code stealing from kafka.server.OffsetManager
